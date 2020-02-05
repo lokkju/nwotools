@@ -1,0 +1,16 @@
+WITH "items.jsonl" as url
+CALL apoc.load.json(url) YIELD row
+MERGE (item:Item {itemId:row.title}) SET item.category=row.category,item.value=row.value,item.quality=row.quality
+FOREACH (tagName in row.tags |
+   MERGE (tag:Tag {name:tagName}) MERGE (item)-[:TAGGED]->(tag)
+)
+
+WITH "recipes.jsonl" as url
+CALL apoc.load.json(url) YIELD value as row
+MERGE (r:Recipe {recipeId:row.name}) ON CREATE SET r.level=row.level,r.commission=row.comission,r.interval=row.interval
+FOREACH (m in row.materials |
+  MERGE (r)-[req:REQUIRES]->(item:Item {itemId: m.item}) SET req.quantity = material.quantity
+)
+FOREACH (p in row.produces |
+  MERGE (r)-[prod:PRODUCES]->(item:Item {itemId: p.item}) SET prod.quantity = p.quantity, prod.tier = p.tier
+)

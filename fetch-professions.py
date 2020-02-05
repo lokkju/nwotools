@@ -69,6 +69,12 @@ def parse_quantity(s):
   i = strip_itemlink(s[1])
   return {'quantity': q, 'item': i}
 
+def intOrZero(i):
+  try:
+    return int(i)
+  except TypeError:
+    return 0
+
 def parse_value(raw):
   """ Extract values as total copper from gold/silver/coppr string
 
@@ -78,8 +84,16 @@ def parse_value(raw):
   >>> parse_value("{{silver}}1 {{copper}}88")
   188
 
+  >>> parse_value("{{silver}}1 {{copper}}1")
+  101
+
+  >>> parse_value("{{gold}}1 {{copper}}89")
+  10089
+
   """
-  return int(raw.replace("{{silver}}","").replace("{{copper}}","").replace(" ","").strip())
+  gd = re.search('(?:{{gold}}(?P<gold>\d+))*\s*(?:{{silver}}(?P<silver>\d+))*\s*(?:{{copper}}(?P<copper>\d+))*', raw).groupdict()
+  val = (intOrZero(gd['gold']) * 100 * 100) + (intOrZero(gd['silver']) * 100) + intOrZero(gd['copper'])
+  return val
 
 def parse_profession_row(raw):
   """Parse a profession row/recipe into a recipe object
@@ -109,18 +123,25 @@ def parse_item_tooltip(raw):
   {'type': 'item', 'tags': ['Substance', 'Material'], 'title': 'Aberrant Blood', 'icon': 'Crafting_Resource_Aberrantblood.png', 'category': 'Profession Material', 'quality': 'common', 'description': 'A phial of blood drawn from the corpse of an aberration.', 'value': 61}
 
   """
-  obj = {'type': 'item', 'tags':[]}
-  parsed = wtp.parse(raw).templates[0]
-  for arg in parsed.arguments:
-    if arg.name.startswith("tag"):
-        obj['tags'].append(arg.value.strip())
-    elif arg.name.strip() == 'value':
-      obj[arg.name.strip()] = parse_value(arg.value)
-    elif arg.name.strip() == '1':
-      continue
-    else:
-      obj[arg.name.strip()] = arg.value.strip()
-  return obj
+  try:
+    obj = {'type': 'item', 'tags':[]}
+    if len(wtp.parse(raw).templates) < 1:
+      return {}
+    parsed = wtp.parse(raw).templates[0]
+    for arg in parsed.arguments:
+      if arg.name.startswith("tag"):
+          obj['tags'].append(arg.value.strip())
+      elif arg.name.strip() == 'value':
+        obj[arg.name.strip()] = parse_value(arg.value)
+      elif arg.name.strip() == '1':
+        continue
+      else:
+        obj[arg.name.strip()] = arg.value.strip()
+    return obj
+  except Exception as e:
+    print("Exception processing:")
+    print(raw)
+    raise e
 
 @cli.command()
 @click.option('--recipes_file', default="recipes.jsonl", help='destination to save recipes to.')
@@ -132,16 +153,21 @@ def update_data(recipes_file,items_file):
   with open(recipes_file, 'w') as recipe_out, open(items_file,'w') as item_out:
     for profession in PROFESSIONS:
       for item in tqdm(site.pages[profession].templates(), desc=f"Fetching items related to {profession}", unit=" items"):
-        if item.name.endswith(f"/Tooltip"):
-          obj = parse_item_tooltip(item.text())
-          item_out.write(json.dumps(obj))
-          item_out.write('\n')
-        elif item.name.startswith(f"{profession}/"):
-          obj = parse_profession_row(item.text())
-          recipe_out.write(json.dumps(obj))
-          recipe_out.write('\n')
-        else:
-          continue
+        try:
+          if item.name.endswith(f"/Tooltip"):
+            obj = parse_item_tooltip(item.text())
+            item_out.write(json.dumps(obj))
+            item_out.write('\n')
+          elif item.name.startswith(f"{profession}/"):
+            obj = parse_profession_row(item.text())
+            recipe_out.write(json.dumps(obj))
+            recipe_out.write('\n')
+          else:
+            continue
+        except:
+          print(f"Exception processing: {item.name}")
+          print(item)
+          raise
 
 if __name__ == '__main__':
     cli()
